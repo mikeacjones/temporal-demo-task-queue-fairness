@@ -1,0 +1,171 @@
+<!doctype html>
+<!-- Presenter dashboard for the Task Queue fairness demo. Plain HTML, CSS and JS on the
+     buildkit's dashboard starter, temporal-theme.css and starfield.js, so it works offline. -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Task Queue fairness · Temporal</title>
+  <meta name="theme-color" content="#141414">
+  <link rel="icon" href="assets/brand/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/css/temporal-theme.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body data-view="act1" data-state="ready">
+  <canvas id="stars" aria-hidden="true"></canvas>
+
+  <div class="app" id="app">
+    <header class="topbar">
+      <img class="logo" src="assets/brand/temporal-logo.svg" alt="Temporal" width="172" height="44">
+      <nav class="acts" aria-label="Demo acts">
+        <button class="act" data-act="act1"><span class="mono">1</span> Noisy neighbor</button>
+        <button class="act" data-act="act2"><span class="mono">2</span> Paid tiers</button>
+        <button class="act" data-act="close"><span class="mono">3</span> Wrap-up</button>
+      </nav>
+      <div class="status-strip">
+        <span class="badge progress" title="The model calls and document tools sleep for a fixed time and return canned output">Simulated model calls</span>
+        <span class="freshness" id="freshness" data-state="idle"><span class="dot" aria-hidden="true"></span><span>Connecting…</span></span>
+        <button class="button secondary ultraviolet small" id="motion-toggle" aria-pressed="false">Pause motion</button>
+      </div>
+    </header>
+
+    <section class="headline">
+      <p class="eyebrow" id="eyebrow"></p>
+      <h1 class="display" id="headline"></h1>
+      <p class="sub mono" id="headline-sub"></p>
+    </section>
+
+    <main class="stage" id="stage">
+      <div class="view view-act1">
+        <section class="card side" data-side="off" aria-labelledby="off-title">
+          <header class="side-head">
+            <span class="badge idle">Fairness off</span>
+            <h2 class="heading" id="off-title">One line for everyone</h2>
+          </header>
+          <p class="side-how mono">No fairness key · first in, first out</p>
+          <div class="big-wait" data-slot="wait"></div>
+          <div class="lanes" data-slot="lanes" role="list" aria-label="Tenants, fairness off"></div>
+        </section>
+
+        <section class="card side" data-side="on" aria-labelledby="on-title">
+          <header class="side-head">
+            <span class="pill">Fairness on</span>
+            <h2 class="heading" id="on-title">Each tenant takes turns</h2>
+          </header>
+          <p class="side-how mono">Each run starts with fairness key = tenant · its Activities inherit it</p>
+          <div class="big-wait" data-slot="wait"></div>
+          <div class="lanes" data-slot="lanes" role="list" aria-label="Tenants, fairness on"></div>
+        </section>
+      </div>
+
+      <div class="view view-act2">
+        <section class="card weights">
+          <header class="panel-head">
+            <h2 class="heading">Weight from each tenant's plan, and the share it actually got</h2>
+            <span class="mono muted" id="act2-scope">Fairness on · last 60 s · weights set when each run starts</span>
+          </header>
+          <div class="weight-legend mono muted">
+            <span><i class="sw-expected" aria-hidden="true"></i>Expected share from weights</span>
+            <span><i class="sw-actual" aria-hidden="true"></i>Actual share of documents started</span>
+          </div>
+          <div class="weight-rows" id="weight-rows"></div>
+        </section>
+      </div>
+
+      <div class="view view-close">
+        <section class="card closing">
+          <div class="closing-main">
+            <p class="eyebrow" id="close-eyebrow">What this run showed</p>
+            <h2 class="display closing-title" id="close-title"></h2>
+            <div class="facts">
+              <div class="fact card">
+                <span class="fact-label">Acme still finished on time</span>
+                <span class="fact-value" id="fact-acme">—</span>
+                <span class="fact-note" id="fact-acme-note">Run act 1 to see Acme's finish time on both sides.</span>
+              </div>
+              <div class="fact card">
+                <span class="fact-label">One queue, one worker pool</span>
+                <span class="fact-value">0</span>
+                <span class="fact-note">per-tenant queues or dedicated workers. Idle capacity goes to whoever has work.</span>
+              </div>
+              <div class="fact card">
+                <span class="fact-label">Paid tiers are a weight</span>
+                <span class="fact-value" id="fact-weights">5 / 2 / 1</span>
+                <span class="fact-note" id="fact-weights-note">Enterprise, Pro, Starter, from each tenant's plan.</span>
+              </div>
+              <div class="fact card">
+                <span class="fact-label">Agents never pick the key</span>
+                <span class="fact-value">1 place</span>
+                <span class="fact-note">The upload starts each agent run with the tenant's key and weight. Every Activity inherits them.</span>
+              </div>
+            </div>
+            <p class="caption">Numbers come from this browser session's runs. Fairness is best effort: it shares dispatches, not CPU time.</p>
+            <div class="closing-actions">
+              <button class="button primary ultraviolet" id="btn-again">Run it again <kbd>R</kbd></button>
+              <a class="button secondary ultraviolet" href="https://docs.temporal.io/develop/task-queue-priority-fairness" target="_blank" rel="noopener">Fairness docs ↗</a>
+              <a class="button secondary ultraviolet temporal-ui-link" href="#" target="_blank" rel="noopener">Open these runs in Temporal UI ↗</a>
+            </div>
+          </div>
+          <div class="ziggy-stage closing-ziggy" aria-hidden="true">
+            <div class="speech">Everyone got a turn.</div>
+            <div class="ziggy-orbit"><img class="ziggy" src="assets/brand/ziggy.png" alt="" width="1000" height="543"></div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="card controls" aria-label="Presenter controls">
+      <div class="ctl-group ctl-act1">
+        <button class="button primary ultraviolet" id="btn-bulk">Start bulk upload <span class="ctl-sub" id="bulk-sub">Acme</span><kbd>B</kbd></button>
+        <button class="button primary ultraviolet" id="btn-trickle">Start small-tenant trickle <kbd>T</kbd></button>
+      </div>
+      <div class="ctl-group ctl-act2">
+        <button class="button primary ultraviolet" id="btn-tiered">Start tiered uploads <span class="ctl-sub" id="tiered-sub">per tenant</span><kbd>B</kbd></button>
+        <div class="weights-edit" aria-label="Plan weights">
+          <span class="ctl-label">Plan weights</span>
+          <label>Enterprise <input type="number" min="1" max="10" value="5" data-plan="Enterprise" aria-label="Enterprise weight"></label>
+          <label>Pro <input type="number" min="1" max="10" value="2" data-plan="Pro" aria-label="Pro weight"></label>
+          <label>Starter <input type="number" min="1" max="10" value="1" data-plan="Starter" aria-label="Starter weight"></label>
+        </div>
+      </div>
+      <div class="ctl-group ctl-end">
+        <p class="ack mono" id="ack" role="status" aria-live="polite"></p>
+        <button class="button secondary green" id="btn-details" aria-controls="drawer" aria-expanded="false">Details <kbd>D</kbd></button>
+        <button class="button secondary ultraviolet" id="btn-reset">Reset <kbd>R</kbd></button>
+      </div>
+    </footer>
+  </div>
+
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="false" aria-labelledby="drawer-title" hidden>
+    <header class="drawer-head">
+      <div>
+        <p class="eyebrow" id="drawer-eyebrow">Details · same run as the main screen</p>
+        <h2 class="heading" id="drawer-title">Details</h2>
+      </div>
+      <button class="button secondary ultraviolet small" id="drawer-close" aria-label="Close details">Close <kbd>Esc</kbd></button>
+    </header>
+    <div class="drawer-tabs" role="tablist" aria-label="Detail views">
+      <button role="tab" data-tab="backlog">Backlog <kbd>1</kbd></button>
+      <button role="tab" data-tab="completions">Completions <kbd>2</kbd></button>
+      <button role="tab" data-tab="tenants">Tenant table <kbd>3</kbd></button>
+      <button role="tab" data-tab="customer" class="act1-only">Cedar's view <kbd>4</kbd></button>
+    </div>
+    <div class="drawer-body" id="drawer-body"></div>
+    <footer class="drawer-foot">
+      <span class="ctl-label">Worker slots per side</span>
+      <div class="stepper" role="group" aria-label="Worker slots per side">
+        <button class="button secondary ultraviolet small" data-slots="-1" aria-label="Fewer worker slots">−</button>
+        <output id="slots" class="stepper-value">8</output>
+        <button class="button secondary ultraviolet small" data-slots="1" aria-label="More worker slots">+</button>
+      </div>
+      <span class="mono muted" id="slots-note">Same on both sides · applies after Reset</span>
+      <span class="mono muted drawer-session" id="session-chip" title="Each browser session gets its own runs">Session</span>
+      <a class="button secondary ultraviolet small temporal-ui-link" href="#" target="_blank" rel="noopener">Temporal UI ↗</a>
+    </footer>
+  </aside>
+
+  <script src="assets/js/starfield.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
