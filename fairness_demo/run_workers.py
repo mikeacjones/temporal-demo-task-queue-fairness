@@ -29,7 +29,7 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from temporalio.client import Client
-    from temporalio.worker import ActivityInboundInterceptor, ExecuteActivityInput, Interceptor, Worker
+    from temporalio.worker import ActivityInboundInterceptor, ExecuteActivityInput, Interceptor, PollerBehaviorAutoscaling, Worker
 
     from . import config
     from .activities import call_model
@@ -134,6 +134,9 @@ class RunWorkerActivities:
                 # Keep every in-flight document run cached, so Workflow Tasks don't replay.
                 max_cached_workflows=config.ACME_BULK_DOCS + 1000,
                 interceptors=[counter],
+                # Scale pollers with the backlog instead of a fixed 5 per task type.
+                workflow_task_poller_behavior=PollerBehaviorAutoscaling(),
+                activity_task_poller_behavior=PollerBehaviorAutoscaling(),
             )
             for queue in (input.fifo_queue, input.fair_queue)
         ]

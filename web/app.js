@@ -84,11 +84,12 @@ function renderHeadline(p) {
 // A small-tenant document open this long is stuck behind other work, not just being processed.
 const stuckAfter = () => 5 * settings.doc_work_s;
 
-function laneState(id, t) {
+function laneState(side, id, t) {
   if (!t.total) return ["No uploads", "idle"];
   if (t.waiting) return [`${num(t.waiting)} waiting`, "waiting"];
   if (t.done === t.total) return ["✓ All done", "good"];
-  if (!settings.small_tenants.includes(id)) return [`${num(t.running)} in progress`, "busy"];
+  // With fairness on, a long-open document is still being worked, not stuck behind Acme.
+  if (side === "on" || !settings.small_tenants.includes(id)) return [`${num(t.running)} in progress`, "busy"];
   // Started but stuck: under FIFO each tool call queues behind the backlog again.
   return t.oldest_open_s > stuckAfter() ? [`${num(t.running)} stuck mid-run`, "waiting"] : ["✓ Keeping up", "good"];
 }
@@ -120,7 +121,7 @@ function renderAct1() {
       `<span class="big-label">Small-tenant time to done · p95</span><span class="big-value">${value}</span><span class="big-note ${cls}">${note}</span>`;
     $('[data-slot="lanes"]', el).innerHTML = settings.tenants.map(({ id }) => {
       const t = side?.tenants[id] || { total: 0, done: 0, running: 0, waiting: 0 };
-      const [state, scls] = laneState(id, t);
+      const [state, scls] = laneState(sideName, id, t);
       return `<div class="lane" role="listitem" style="--c:${COLORS[id]}">
         ${tenantCell(id)}
         <span class="docs" role="img" aria-label="${T(id).name}: ${num(t.running)} in progress, ${num(t.waiting)} waiting, ${num(t.done)} of ${num(t.total)} done">${laneDocs(t)}</span>
