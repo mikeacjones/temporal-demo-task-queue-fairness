@@ -92,7 +92,7 @@ Set these in the environment of both the Worker and the API.
 | `SIM_TOOL_SECONDS` | `0.5` | Each simulated tool |
 | `TASK_QUEUE` | `docs` | Base name: `<base>-fifo`, `<base>-fair`, `<base>-control` |
 | `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, `TEMPORAL_API_KEY`, `TEMPORAL_TLS*` | `localhost:7233`, `default` | Temporal connection. The demo reads env vars only and ignores CLI profile files |
-| `API_HOST`, `API_PORT` | `127.0.0.1`, `8080` | API bind address |
+| `API_HOST`, `PORT` | `127.0.0.1`, `8080` | API bind address |
 | `SESSION_SECRET` | random per process | Signs the session cookie. Set it when the API runs as more than one replica or must keep sessions across restarts |
 | `TEMPORAL_UI_URL` | `http://localhost:8233` | Target of the dashboard's Temporal UI links |
 

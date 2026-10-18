@@ -35,7 +35,9 @@ DEFAULT_WORKER_SLOTS = _int("WORKER_SLOTS", 8)
 MAX_WORKER_SLOTS = 32
 
 API_HOST = os.environ.get("API_HOST", "127.0.0.1")
-API_PORT = _int("API_PORT", 8080)
+# PORT, not API_PORT: Kubernetes sets API_PORT=tcp://... in every pod when a Service
+# named "api" exists, and a bare PORT can never collide with a Service link variable.
+API_PORT = _int("PORT", 8080)
 SESSION_SECRET = os.environ.get("SESSION_SECRET", "")
 TEMPORAL_UI_URL = os.environ.get("TEMPORAL_UI_URL", "http://localhost:8233")
 
