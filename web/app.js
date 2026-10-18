@@ -73,19 +73,24 @@ function renderHeadline(p) {
     h.innerHTML = `Acme uploaded <span class="text-gradient-green">${num(settings.acme_bulk_docs)} documents</span>. Both sides now have a backlog.`;
     sub.textContent = "Small tenants haven't uploaded yet · press Start small-tenant trickle";
   } else {
-    const off = view.sides.off.small.p95_wait_s, on = view.sides.on.small.p95_wait_s;
+    const off = view.sides.off.small.p95_took_s, on = view.sides.on.small.p95_took_s;
     h.innerHTML = on <= off
-      ? `With fairness, small tenants wait <span class="text-gradient-green">${dur(on)}</span> instead of <span class="muted-number">${dur(off)}</span>.`
-      : `Small tenants wait ${dur(on)} with fairness and ${dur(off)} without.`;
-    sub.textContent = "p95 wait from upload to processing start for Birchwood, Cedar, and Dune, including documents still waiting";
+      ? `With fairness, small tenants' documents are done in <span class="text-gradient-green">${dur(on)}</span> instead of <span class="muted-number">${dur(off)}</span>.`
+      : `Small tenants' documents are done in ${dur(on)} with fairness and ${dur(off)} without.`;
+    sub.textContent = "p95 from upload to done for Birchwood, Cedar, and Dune · documents not done yet count their time so far";
   }
 }
+
+// A small-tenant document open this long is stuck behind other work, not just being processed.
+const stuckAfter = () => 5 * settings.doc_work_s;
 
 function laneState(id, t) {
   if (!t.total) return ["No uploads", "idle"];
   if (t.waiting) return [`${num(t.waiting)} waiting`, "waiting"];
   if (t.done === t.total) return ["✓ All done", "good"];
-  return settings.small_tenants.includes(id) ? ["✓ Keeping up", "good"] : [`${num(t.running)} in progress`, "busy"];
+  if (!settings.small_tenants.includes(id)) return [`${num(t.running)} in progress`, "busy"];
+  // Started but stuck: under FIFO each tool call queues behind the backlog again.
+  return t.oldest_open_s > stuckAfter() ? [`${num(t.running)} stuck mid-run`, "waiting"] : ["✓ Keeping up", "good"];
 }
 
 // One square per document in flight, the same unit in every lane, so counts compare across
@@ -106,12 +111,13 @@ function renderAct1() {
     const small = side?.small;
     let value = "—", note = "No small-tenant uploads yet", cls = "";
     if (small?.total) {
-      value = dur(small.p95_wait_s);
-      if (small.waiting) { note = `${num(small.waiting)} small-tenant document${small.waiting === 1 ? "" : "s"} waiting behind Acme`; cls = "waiting"; }
-      else { note = sideName === "on" ? "Small-tenant documents start as they arrive" : "No small-tenant documents waiting now"; cls = "good"; }
+      value = dur(small.p95_took_s);
+      if (small.open && small.oldest_open_s > stuckAfter()) {
+        note = `${num(small.open)} small-tenant document${small.open === 1 ? "" : "s"} not done · oldest ${dur(small.oldest_open_s)}`; cls = "waiting";
+      } else { note = small.open ? "Small-tenant documents finish as they arrive" : "Every small-tenant document is done"; cls = "good"; }
     }
     $('[data-slot="wait"]', el).innerHTML =
-      `<span class="big-label">Small-tenant wait · p95</span><span class="big-value">${value}</span><span class="big-note ${cls}">${note}</span>`;
+      `<span class="big-label">Small-tenant time to done · p95</span><span class="big-value">${value}</span><span class="big-note ${cls}">${note}</span>`;
     $('[data-slot="lanes"]', el).innerHTML = settings.tenants.map(({ id }) => {
       const t = side?.tenants[id] || { total: 0, done: 0, running: 0, waiting: 0 };
       const [state, scls] = laneState(id, t);
@@ -126,7 +132,7 @@ function renderAct1() {
 
 function act2Shares() {
   const side = view?.sides.on, w = runInfo.weights || weights();
-  const recent = side?.recent_starts || {}, total = Object.values(recent).reduce((a, b) => a + b, 0);
+  const recent = side?.recent_activity_starts || {}, total = Object.values(recent).reduce((a, b) => a + b, 0);
   const busy = settings.tenants.filter(t => side?.tenants[t.id]?.waiting);
   const pool = busy.length ? busy : settings.tenants;
   const wsum = pool.reduce((a, t) => a + w[t.plan], 0);
@@ -142,7 +148,7 @@ function renderAct2() {
   const started = runInfo.kind === "act2" && runInfo.done.includes("tiered");
   const shares = act2Shares();
   $("#act2-scope").textContent = started
-    ? "Fairness on · documents started in the last 60 s · weights set when each run starts"
+    ? "Fairness on · Activities started in the last 60 s, model calls and tool calls · weights set when each run starts"
     : `Press Start tiered uploads: every tenant uploads ${num(settings.tiered_docs_per_tenant)} documents at once`;
   $("#weight-rows").innerHTML = settings.tenants.map(t => {
     const s = shares[t.id];
@@ -151,7 +157,7 @@ function renderAct2() {
       <span class="weight">×${s.weight}<small>plan weight</small></span>
       <div class="wbars">
         <div class="wbar expected"><span class="track"><span class="fill" style="width:${s.expected}%"></span></span><span class="val">expected ${s.expected.toFixed(1)}%</span></div>
-        <div class="wbar actual"><span class="track"><span class="fill" style="width:${started ? s.actual : 0}%"></span></span><span class="val">${started ? `actual ${s.actual.toFixed(1)}% · ${s.perMin} started/min` : "actual —"}</span></div>
+        <div class="wbar actual"><span class="track"><span class="fill" style="width:${started ? s.actual : 0}%"></span></span><span class="val">${started ? `actual ${s.actual.toFixed(1)}% · ${num(s.perMin)}/min` : "actual —"}</span></div>
       </div>
     </div>`;
   }).join("");
@@ -162,8 +168,8 @@ function renderClose() {
   const a1 = store.get("act1Summary", null), a2 = store.get("act2Summary", null);
   $("#close-eyebrow").textContent = `What this run showed · same ${a1?.slots ?? settings.worker_slots} worker slots per side`;
   $("#close-title").innerHTML = a1?.smallOff != null
-    ? `Small tenants' p95 wait fell from ${dur(a1.smallOff)} to <span class="text-gradient-green">${dur(a1.smallOn)}</span>.`
-    : "Run act 1 to compare small tenants' wait with and without fairness.";
+    ? `Small tenants' p95 time to done fell from ${dur(a1.smallOff)} to <span class="text-gradient-green">${dur(a1.smallOn)}</span>.`
+    : "Run act 1 to compare small tenants' time to done with and without fairness.";
   if (a1?.acmeOff != null && a1?.acmeOn != null) {
     const diff = a1.acmeOn - a1.acmeOff;
     $("#fact-acme").textContent = `${diff >= 0 ? "+" : "−"}${dur(Math.abs(diff))}`;
@@ -171,7 +177,7 @@ function renderClose() {
   }
   if (a2) {
     $("#fact-weights").textContent = `${a2.weights.Enterprise} / ${a2.weights.Pro} / ${a2.weights.Starter}`;
-    $("#fact-weights-note").textContent = `Enterprise, Pro, Starter, from each tenant's plan. Enterprise got ${a2.actual.toFixed(0)}% of document starts; ${a2.expected.toFixed(0)}% expected.`;
+    $("#fact-weights-note").textContent = `Enterprise, Pro, Starter, from each tenant's plan. Enterprise got ${a2.actual.toFixed(0)}% of Activity starts; ${a2.expected.toFixed(0)}% expected.`;
   }
 }
 
@@ -180,7 +186,7 @@ function saveSummaries() {
   if (runInfo.kind === "act1" && view.sides.off.small.total) {
     const off = view.sides.off, on = view.sides.on;
     store.set("act1Summary", {
-      smallOff: off.small.p95_wait_s, smallOn: on.small.p95_wait_s,
+      smallOff: off.small.p95_took_s, smallOn: on.small.p95_took_s,
       acmeOff: off.tenants.acme.done === off.tenants.acme.total ? off.tenants.acme.last_finish_s : null,
       acmeOn: on.tenants.acme.done === on.tenants.acme.total ? on.tenants.acme.last_finish_s : null,
       acmeDocs: off.tenants.acme.total, slots: settings.worker_slots,
@@ -188,7 +194,7 @@ function saveSummaries() {
   }
   if (runInfo.kind === "act2" && runInfo.done.includes("tiered")) {
     const s = act2Shares().acme;
-    if (Object.values(view.sides.on.recent_starts).some(Boolean)) store.set("act2Summary", { weights: runInfo.weights, actual: s.actual, expected: s.expected });
+    if (Object.values(view.sides.on.recent_activity_starts).some(Boolean)) store.set("act2Summary", { weights: runInfo.weights, actual: s.actual, expected: s.expected });
   }
 }
 
@@ -270,14 +276,14 @@ function tenantsTab() {
   const sides = act === "act2" ? ["on"] : ["off", "on"];
   const table = side => {
     const s = view.sides[side];
-    return `<div class="pane"><div class="pane-title">${sideBadge(side)}<span class="mono">Task Queue ${settings.task_queues[side]}</span></div>
-    <table class="ttable"><thead><tr><th>Tenant</th><th>Plan</th><th>Fairness key</th><th>Weight</th><th>Done</th><th>Waiting</th><th>Running</th><th>p95 wait</th></tr></thead>
+    return `<div class="pane"><div class="pane-title">${sideBadge(side)}<span class="mono">Task Queue ${view.task_queues?.[side] ?? settings.task_queues[side]}</span></div>
+    <table class="ttable"><thead><tr><th>Tenant</th><th>Plan</th><th>Fairness key</th><th>Weight</th><th>Done</th><th>Waiting</th><th>Running</th><th>p95 wait</th><th>p95 to done</th></tr></thead>
     <tbody>${settings.tenants.map(t => { const r = s.tenants[t.id]; return `<tr><td>${tenantCell(t.id)}</td><td>${t.plan}</td>
       <td>${side === "off" ? "none" : t.fairness_key}</td><td>${side === "off" ? "—" : tenantWeight(t.id)}</td>
       <td>${r.total ? `${num(r.done)} / ${num(r.total)}` : "—"}</td>
-      <td class="${r.waiting ? "waiting" : ""}">${num(r.waiting)}</td><td>${num(r.running)}</td><td>${dur(r.p95_wait_s)}</td></tr>`; }).join("")}</tbody></table></div>`;
+      <td class="${r.waiting ? "waiting" : ""}">${num(r.waiting)}</td><td>${num(r.running)}</td><td>${dur(r.p95_wait_s)}</td><td>${dur(r.p95_took_s)}</td></tr>`; }).join("")}</tbody></table></div>`;
   };
-  return `<section class="dsec"><div class="dsec-head"><h3>Per-tenant numbers</h3><span class="mono">Wait = upload to processing start · p95 includes documents still waiting</span></div>
+  return `<section class="dsec"><div class="dsec-head"><h3>Per-tenant numbers</h3><span class="mono">Wait = upload to processing start · To done = upload to finished · p95s count unfinished documents at their time so far</span></div>
     ${sides.map(table).join("")}
     <p class="note">The agents never set a fairness key. The upload starts each document's agent run with the tenant's fairness key and plan weight, and every Workflow Task and Activity of that run inherits them. Both Task Queues are named from one TASK_QUEUE setting. Processing start is recorded when the model call returns, so a document can show as waiting for up to a model call after it starts; its wait is still measured from the true start time.</p></section>`;
 }
@@ -287,8 +293,8 @@ function customerTab() {
     const docs = view?.sides[side].cedar || [];
     const ready = docs.filter(d => d.state === "done").length;
     const state = d => d.state === "done" ? [`✓ Ready · took ${dur(d.took_s)}`, "good"]
-      : d.state === "running" ? ["◔ Processing", "busy"]
-      : d.state === "waiting" ? [`◷ Queued · ${dur(d.wait_s)}`, "waiting"] : ["Stopped", "idle"];
+      : d.state === "running" ? [`◔ Processing · ${dur(d.took_s)}`, "busy"]
+      : d.state === "waiting" ? [`◷ Queued · ${dur(d.took_s)}`, "waiting"] : ["Stopped", "idle"];
     return `<div class="pane"><div class="pane-title">${sideBadge(side)}</div>
     <div class="portal"><div class="portal-bar"><i class="sw" aria-hidden="true"></i><strong>Cedar Health · Document inbox</strong><span class="mono muted">Starter plan</span></div>
     ${docs.length ? `<ul class="portal-list">${docs.map(d => { const [st, cls] = state(d); return `<li><span class="doc">${d.file}</span><span class="up">Uploaded ${clock(d.uploaded_s)}</span><span class="state ${cls}">${st}</span></li>`; }).join("")}</ul>
@@ -440,7 +446,8 @@ async function poll() {
   try {
     const v = await api(`/api/runs/${forRun}/view`, { signal: polling.signal });
     if (forRun !== run) return;
-    view = v; viewAt = Date.now(); failing = false;
+    // age_s is how old the server's listing is, so a slow refresh shows as a stale view.
+    view = v; viewAt = Date.now() - (v.age_s || 0) * 1000; failing = false;
     const ui = `${settings.temporal_ui}/namespaces/${encodeURIComponent(settings.namespace)}/workflows?query=${encodeURIComponent(v.temporal_query)}`;
     $$(".temporal-ui-link").forEach(a => (a.href = ui));
     render();

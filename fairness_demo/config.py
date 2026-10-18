@@ -28,11 +28,13 @@ CONTROL_QUEUE = f"{TASK_QUEUE}-control"
 
 ACME_BULK_DOCS = _int("ACME_BULK_DOCS", 2000)
 TIERED_DOCS_PER_TENANT = _int("TIERED_DOCS_PER_TENANT", 500)
-TRICKLE_DOCS = {k: int(v) for k, v in _per_tenant("TRICKLE_DOCS", "birch=7,cedar=5,dune=6").items()}
-TRICKLE_INTERVAL_S = _per_tenant("TRICKLE_INTERVAL_S", "birch=18,cedar=26,dune=22")
+TRICKLE_DOCS = {k: int(v) for k, v in _per_tenant("TRICKLE_DOCS", "birch=12,cedar=9,dune=10").items()}
+TRICKLE_INTERVAL_S = _per_tenant("TRICKLE_INTERVAL_S", "birch=10,cedar=14,dune=12")
 
 DEFAULT_WORKER_SLOTS = _int("WORKER_SLOTS", 8)
 MAX_WORKER_SLOTS = 32
+# Runs whose document Workers one Worker process can host at once.
+MAX_ACTIVE_RUNS = _int("MAX_ACTIVE_RUNS", 20)
 
 API_HOST = os.environ.get("API_HOST", "127.0.0.1")
 # PORT, not API_PORT: Kubernetes sets API_PORT=tcp://... in every pod when a Service

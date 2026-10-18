@@ -1,7 +1,10 @@
-"""Workers for both document Task Queues, plus the uploads and settings Workflows.
+"""The Worker process: the control Worker, which starts and stops every run's own Workers.
 
-The fairness-off and fairness-on Workers are identical: same agent, same tools, same number
-of Activity slots. Only the Priority each document run starts with differs.
+Each demo run gets its own fairness-off and fairness-on Task Queues. The control Worker runs
+the uploads and settings Workflows, plus one RunWorkers Workflow per run, whose Activity
+creates that run's two document Workers in this process and stops them when the run ends
+(see run_workers.py). The two document Workers are identical: same agent, same tools, same
+number of Activity slots. Only the Priority each document run starts with differs.
 
 Run with ``python -m fairness_demo.worker``.
 """
@@ -16,13 +19,11 @@ from temporalio.worker import Worker
 from temporal_agent_harness.plugin import AgentHarnessPlugin
 
 from . import config
-from .activities import DOCUMENT_TOOLS, call_model
-from .document_agent import DocumentAgent
+from .activities import DOCUMENT_TOOLS
+from .run_workers import RunWorkerActivities, RunWorkers
 from .uploads import UploadActivities, UploadScenario, WorkerSettings
 
 log = logging.getLogger("fairness_demo.worker")
-
-SETTINGS_POLL_S = 2.0
 
 
 def settings_workflow_id() -> str:
@@ -47,55 +48,21 @@ async def read_worker_slots(client: Client) -> int | None:
     return int(slots) if slots else None
 
 
-def document_workers(client: Client, slots: int) -> list[Worker]:
-    return [
-        Worker(
-            client,
-            task_queue=queue,
-            workflows=[DocumentAgent],
-            activities=[call_model],
-            # The constraint the demo is about: a fixed number of Activities at once.
-            max_concurrent_activities=slots,
-            # Keep every in-flight document run cached, so Workflow Tasks don't replay history.
-            max_cached_workflows=config.ACME_BULK_DOCS + 1000,
-        )
-        for queue in (config.FIFO_QUEUE, config.FAIR_QUEUE)
-    ]
-
-
-async def run_document_workers(client: Client) -> None:
-    """Run both document Workers, restarting them when the slot setting changes."""
-    slots = await read_worker_slots(client) or config.DEFAULT_WORKER_SLOTS
-    while True:
-        workers = document_workers(client, slots)
-        tasks = [asyncio.create_task(w.run()) for w in workers]
-        log.info(
-            "document workers polling queues=%s,%s activity_slots=%d",
-            config.FIFO_QUEUE, config.FAIR_QUEUE, slots,
-        )
-        while True:
-            await asyncio.sleep(SETTINGS_POLL_S)
-            wanted = await read_worker_slots(client)
-            if wanted and wanted != slots:
-                break
-        log.info("worker slots changed from=%d to=%d; restarting document workers", slots, wanted)
-        await asyncio.gather(*(w.shutdown() for w in workers))
-        await asyncio.gather(*tasks, return_exceptions=True)
-        slots = wanted
-
-
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s level=%(levelname)s %(name)s %(message)s")
     client = await connect()
     uploads = UploadActivities(client)
+    run_workers = RunWorkerActivities(client)
     control = Worker(
         client,
         task_queue=config.CONTROL_QUEUE,
-        workflows=[UploadScenario, WorkerSettings],
-        activities=[uploads.upload_documents],
+        workflows=[UploadScenario, WorkerSettings, RunWorkers],
+        activities=[uploads.upload_documents, run_workers.serve_run_queues],
+        # Each active run holds one slot for its serve_run_queues Activity, for its lifetime.
+        max_concurrent_activities=config.MAX_ACTIVE_RUNS + 50,
     )
     log.info("control worker polling queue=%s", config.CONTROL_QUEUE)
-    await asyncio.gather(control.run(), run_document_workers(client))
+    await control.run()
 
 
 if __name__ == "__main__":

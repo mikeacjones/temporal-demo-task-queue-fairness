@@ -50,9 +50,10 @@ class UploadBatch:
     fair_queue: str
 
 
-# Enough concurrent starts to upload 2,000 documents per side in well under a minute,
-# without one burst crowding a shared Namespace's Actions-per-second limit.
-UPLOAD_CONCURRENCY = 32
+# Documents started per heartbeat, all at once. Acme's whole backlog lands in seconds, so it is
+# already queued when the presenter starts the trickle. If the burst passes the Namespace's
+# Actions-per-second limit, the client retries the throttled starts.
+UPLOAD_CONCURRENCY = 500
 
 
 class UploadActivities:
@@ -67,15 +68,11 @@ class UploadActivities:
         the heartbeat records how far a previous attempt got.
         """
         done = activity.info().heartbeat_details[0] if activity.info().heartbeat_details else 0
-        gate = asyncio.Semaphore(UPLOAD_CONCURRENCY)
-
-        async def upload(n: int, side: str) -> None:
-            async with gate:
-                await self._start_document(batch, n, side)
-
         for start in range(batch.first + done, batch.first + batch.count, UPLOAD_CONCURRENCY):
             end = min(start + UPLOAD_CONCURRENCY, batch.first + batch.count)
-            await asyncio.gather(*(upload(n, side) for n in range(start, end) for side in batch.sides))
+            await asyncio.gather(
+                *(self._start_document(batch, n, side) for n in range(start, end) for side in batch.sides)
+            )
             activity.heartbeat(end - batch.first)
         return batch.count
 
@@ -240,8 +237,8 @@ class WorkerSettingsInput:
 
 @workflow.defn
 class WorkerSettings:
-    """Activity slots per Worker, shared by every session. Workers read it from the memo
-    with Describe and restart their Task Queue Workers when it changes."""
+    """Activity slots per document Worker, shared by every session. The API reads it from the
+    memo with Describe when a run starts, and that run's Workers use it."""
 
     @workflow.init
     def __init__(self, input: WorkerSettingsInput) -> None:

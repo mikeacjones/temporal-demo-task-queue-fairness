@@ -47,6 +47,12 @@ class Doc:
     def wait_s(self, now: float) -> float:
         return (self.started if self.started is not None else now) - self.uploaded
 
+    def took_s(self, now: float) -> float:
+        """Upload to done. Under saturation every step of a run queues again, not just its first
+        Activity, so this is the time a customer actually waits. Unfinished documents count
+        their time so far."""
+        return (self.finished if self.finished is not None else now) - self.uploaded
+
 
 def to_doc(run_key: str, wf: WorkflowExecution, started_now: dict[str, datetime]) -> Doc:
     side, tenant, n = parse_document_workflow_id(run_key, wf.id)
@@ -70,7 +76,7 @@ def p95(values: list[float]) -> float | None:
     return ordered[max(0, math.ceil(0.95 * len(ordered)) - 1)]
 
 
-def side_view(docs: list[Doc], t0: float, now: float) -> dict:
+def side_view(docs: list[Doc], t0: float, now: float, activity_starts: list) -> dict:
     tenants = {}
     for t in TENANTS:
         mine = [d for d in docs if d.tenant == t.id]
@@ -80,6 +86,8 @@ def side_view(docs: list[Doc], t0: float, now: float) -> dict:
             "running": sum(d.running for d in mine),
             "done": sum(d.done for d in mine),
             "p95_wait_s": p95([d.wait_s(now) for d in mine]),
+            "p95_took_s": p95([d.took_s(now) for d in mine]),
+            "oldest_open_s": max((d.took_s(now) for d in mine if d.finished is None), default=None),
             "last_finish_s": max((d.finished - t0 for d in mine if d.done), default=None),
         }
     small = [d for d in docs if d.tenant in SMALL_TENANTS]
@@ -108,6 +116,9 @@ def side_view(docs: list[Doc], t0: float, now: float) -> dict:
             "total": len(small),
             "waiting": sum(d.waiting for d in small),
             "p95_wait_s": p95([d.wait_s(now) for d in small]),
+            "p95_took_s": p95([d.took_s(now) for d in small]),
+            "open": sum(d.finished is None for d in small),
+            "oldest_open_s": max((d.took_s(now) for d in small if d.finished is None), default=None),
         },
         "completions": completions,
         "backlog": backlog,
@@ -122,13 +133,14 @@ def side_view(docs: list[Doc], t0: float, now: float) -> dict:
                 "uploaded_s": d.uploaded - t0,
                 "state": "done" if d.done else "running" if d.running else "waiting" if d.waiting else "stopped",
                 "wait_s": d.wait_s(now),
-                "took_s": (d.finished - d.uploaded) if d.done and d.finished else None,
+                "took_s": d.took_s(now),
             }
             for d in sorted((d for d in docs if d.tenant == "cedar"), key=lambda d: d.n)
         ],
-        # Fairness shares dispatches, so act 2 compares weights with documents started.
-        "recent_starts": {
-            t.id: sum(1 for d in docs if d.tenant == t.id and d.started and d.started > now - 60)
+        # Fairness shares dispatches, so act 2 compares weights with Activities started: the
+        # model call and every tool call, counted by the run's Workers (run_workers.py).
+        "recent_activity_starts": {
+            t.id: sum(n for bucket, tenant, n in activity_starts if tenant == t.id and bucket > now - 60)
             for t in TENANTS
         },
     }
@@ -139,9 +151,11 @@ def build_view(
     executions: list[WorkflowExecution],
     now: datetime,
     started_now: dict[str, datetime] | None = None,
+    activity_starts: list | None = None,
 ) -> dict:
     """``started_now`` holds start times found with Describe for documents whose start isn't
-    in Visibility yet."""
+    in Visibility yet. ``activity_starts`` holds [bucket, side, tenant, count] rows from the
+    Workers' counter."""
     docs = [to_doc(run_key, wf, started_now or {}) for wf in executions]
     now_s = now.timestamp()
     t0 = min((d.uploaded for d in docs), default=now_s)
@@ -150,5 +164,13 @@ def build_view(
         "elapsed_s": now_s - t0 if docs else 0,
         "bucket_s": BUCKET_S,
         "documents": len(docs),
-        "sides": {side: side_view([d for d in docs if d.side == side], t0, now_s) for side in SIDES},
+        "sides": {
+            side: side_view(
+                [d for d in docs if d.side == side],
+                t0,
+                now_s,
+                [(b, tenant, n) for b, s, tenant, n in activity_starts or [] if s == side],
+            )
+            for side in SIDES
+        },
     }
