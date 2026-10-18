@@ -88,6 +88,18 @@ function laneState(id, t) {
   return settings.small_tenants.includes(id) ? ["✓ Keeping up", "good"] : [`${num(t.running)} in progress`, "busy"];
 }
 
+// One square per document in flight, the same unit in every lane, so counts compare across
+// tenants. Done documents leave the lane. Past LANE_CELLS, in-progress and waiting split the
+// lane so both stay visible, and a cut-off group ends in "…".
+const LANE_CELLS = 30;
+function laneDocs(t) {
+  const run = Math.min(t.running, Math.max(LANE_CELLS / 2, LANE_CELLS - t.waiting));
+  const group = (cls, shown, n) => shown < n
+    ? `<i class="${cls}"></i>`.repeat(shown - 1) + `<span class="more ${cls}">…</span>`
+    : `<i class="${cls}"></i>`.repeat(shown);
+  return group("run", run, t.running) + group("wait", Math.min(t.waiting, LANE_CELLS - run), t.waiting);
+}
+
 function renderAct1() {
   for (const sideName of ["off", "on"]) {
     const side = view?.sides[sideName], el = $(`.side[data-side="${sideName}"]`);
@@ -102,12 +114,11 @@ function renderAct1() {
       `<span class="big-label">Small-tenant wait · p95</span><span class="big-value">${value}</span><span class="big-note ${cls}">${note}</span>`;
     $('[data-slot="lanes"]', el).innerHTML = settings.tenants.map(({ id }) => {
       const t = side?.tenants[id] || { total: 0, done: 0, running: 0, waiting: 0 };
-      const pct = v => (t.total ? (v / t.total) * 100 : 0);
       const [state, scls] = laneState(id, t);
       return `<div class="lane" role="listitem" style="--c:${COLORS[id]}">
         ${tenantCell(id)}
-        <span class="bar" role="img" aria-label="${num(t.done)} of ${num(t.total)} done"><span class="done" style="width:${pct(t.done)}%"></span><span class="run" style="width:${pct(t.running)}%"></span><span class="wait" style="width:${pct(t.waiting)}%"></span></span>
-        <span class="state ${scls}">${state}</span>
+        <span class="docs" role="img" aria-label="${T(id).name}: ${num(t.running)} in progress, ${num(t.waiting)} waiting, ${num(t.done)} of ${num(t.total)} done">${laneDocs(t)}</span>
+        <span class="state ${scls}">${state}${t.total ? `<small>${num(t.done)} of ${num(t.total)} done</small>` : ""}</span>
       </div>`;
     }).join("");
   }
