@@ -62,6 +62,8 @@ uv run python -m fairness_demo.api
 
 Open http://127.0.0.1:8080. The Temporal UI is at http://localhost:8233.
 
+To present the demo, follow [RUNBOOK.md](RUNBOOK.md): the walkthrough beat by beat, and where in the code each part happens.
+
 | Control | Key | What it does |
 |---|---|---|
 | Bulk upload | `B` | Act 1: Acme uploads its bulk batch to both queues. Act 2: every tenant uploads to the fair queue |
